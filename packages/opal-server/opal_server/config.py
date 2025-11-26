@@ -369,7 +369,8 @@ class OpalServerConfig(Confi):
     REDIS_URL = confi.str(
         "REDIS_URL",
         default="redis://localhost",
-        description="The URL for the Redis server",
+        description="The URL for the Redis server. Supports standard redis:// and Sentinel redis+sentinel:// schemes. "
+        "Sentinel format: redis+sentinel://sentinel1:26379,sentinel2:26379/mymaster?password=secret&ssl=true",
     )
 
     BASE_DIR = confi.str(

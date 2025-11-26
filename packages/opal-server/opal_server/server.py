@@ -183,6 +183,9 @@ class OpalServer:
             self._redis_db = RedisDB(opal_server_config.REDIS_URL)
             self._scopes = ScopeRepository(self._redis_db)
             logger.info("OPAL Scopes: server is connected to scopes repository")
+        else:
+            self._redis_db = None
+            self._scopes = None
 
         # init fastapi app
         self.app: FastAPI = self._init_fast_api_app()
@@ -392,6 +395,8 @@ class OpalServer:
             tasks.append(asyncio.create_task(self.broadcast_keepalive.stop()))
         if self.opal_statistics is not None:
             tasks.append(asyncio.create_task(self.opal_statistics.stop()))
+        if self._redis_db is not None:
+            tasks.append(asyncio.create_task(self._redis_db.close()))
 
         try:
             await asyncio.gather(*tasks)
