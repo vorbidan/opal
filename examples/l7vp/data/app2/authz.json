@@ -1,0 +1,73 @@
+[
+    {
+      "paths": [
+        "/health"
+      ],
+      "methods": [
+        "GET",
+        "HEAD"
+      ]
+    },
+    {
+      "paths": [
+        "/actuator/*"
+      ],
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "cidrs": [
+        "10.10.10.0/24",
+        "10.10.20.21/32"
+      ]
+    },
+    {
+      "paths": [
+        "/users",
+        "/users/*"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "sat": {
+        "capabilities": [
+          "x1:fah:activate:*"
+        ],
+        "allowedPartners": [
+          "comcast",
+          "cox"
+        ]
+      }
+    },
+    {
+      "paths": [
+        "/users",
+        "/users/*"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "websec": {
+        "anything": [
+          "x1:fah:activate:*",
+          "x2:fah:activate:*"
+        ],
+        "scopes": [
+          "asfasdfsadf"
+        ]
+      }
+    },
+    {
+      "paths": [
+        "/*"
+      ],
+      "sat": {
+        "capabilities": [
+          "x1:fah:activate:writer"
+        ],
+        "allowedPartners": [
+          "comcast"
+        ]
+      }
+    }
+]

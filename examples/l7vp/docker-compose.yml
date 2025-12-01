@@ -1,0 +1,206 @@
+version: '3.8'
+
+name: opal-sentinel-example
+
+services:
+  # Redis Sentinel Setup: 3 nodes each running Redis + Sentinel
+  # Node 1: Master (initially)
+  redis-sentinel-1:
+    image: "redis:7-alpine"
+    container_name: redis-sentinel-1
+    command: >
+      sh -c "
+      redis-server --port 6380 --bind 0.0.0.0 --replica-announce-ip 127.0.0.1 &
+      sleep 2 &&
+      echo 'port 26379' > /tmp/sentinel.conf &&
+      echo 'bind 0.0.0.0' >> /tmp/sentinel.conf &&
+      echo 'sentinel announce-ip 127.0.0.1' >> /tmp/sentinel.conf &&
+      echo 'sentinel monitor mymaster 127.0.0.1 6380 2' >> /tmp/sentinel.conf &&
+      echo 'sentinel down-after-milliseconds mymaster 5000' >> /tmp/sentinel.conf &&
+      echo 'sentinel parallel-syncs mymaster 1' >> /tmp/sentinel.conf &&
+      echo 'sentinel failover-timeout mymaster 10000' >> /tmp/sentinel.conf &&
+      redis-sentinel /tmp/sentinel.conf
+      "
+    ports:
+      - "6380:6380"
+      - "26379:26379"
+    network_mode: "host"
+
+  # Node 2: Replica + Sentinel
+  redis-sentinel-2:
+    image: "redis:7-alpine"
+    container_name: redis-sentinel-2
+    command: >
+      sh -c "
+      redis-server --port 6381 --bind 0.0.0.0 --replicaof 127.0.0.1 6380 --replica-announce-ip 127.0.0.1 &
+      sleep 2 &&
+      echo 'port 26380' > /tmp/sentinel.conf &&
+      echo 'bind 0.0.0.0' >> /tmp/sentinel.conf &&
+      echo 'sentinel announce-ip 127.0.0.1' >> /tmp/sentinel.conf &&
+      echo 'sentinel monitor mymaster 127.0.0.1 6380 2' >> /tmp/sentinel.conf &&
+      echo 'sentinel down-after-milliseconds mymaster 5000' >> /tmp/sentinel.conf &&
+      echo 'sentinel parallel-syncs mymaster 1' >> /tmp/sentinel.conf &&
+      echo 'sentinel failover-timeout mymaster 10000' >> /tmp/sentinel.conf &&
+      redis-sentinel /tmp/sentinel.conf
+      "
+    ports:
+      - "6381:6381"
+      - "26380:26380"
+    network_mode: "host"
+    depends_on:
+      - redis-sentinel-1
+
+  # Node 3: Replica + Sentinel
+  redis-sentinel-3:
+    image: "redis:7-alpine"
+    container_name: redis-sentinel-3
+    command: >
+      sh -c "
+      redis-server --port 6382 --bind 0.0.0.0 --replicaof 127.0.0.1 6380 --replica-announce-ip 127.0.0.1 &
+      sleep 2 &&
+      echo 'port 26381' > /tmp/sentinel.conf &&
+      echo 'bind 0.0.0.0' >> /tmp/sentinel.conf &&
+      echo 'sentinel announce-ip 127.0.0.1' >> /tmp/sentinel.conf &&
+      echo 'sentinel monitor mymaster 127.0.0.1 6380 2' >> /tmp/sentinel.conf &&
+      echo 'sentinel down-after-milliseconds mymaster 5000' >> /tmp/sentinel.conf &&
+      echo 'sentinel parallel-syncs mymaster 1' >> /tmp/sentinel.conf &&
+      echo 'sentinel failover-timeout mymaster 10000' >> /tmp/sentinel.conf &&
+      redis-sentinel /tmp/sentinel.conf
+      "
+    ports:
+      - "6382:6382"
+      - "26381:26381"
+    network_mode: "host"
+    depends_on:
+      - redis-sentinel-1
+
+  opal-server:
+    # by default we run opal-server from latest official image
+    image: hub.comcast.net/dhapigw/opal-server:latest
+    container_name: opal-server
+    environment:
+      # OPAL Server with Redis Sentinel for broadcast channel      
+      - OPAL_BROADCAST_URI=redis+sentinel://127.0.0.1:26379,127.0.0.1:26380,127.0.0.1:26381/mymaster
+      - OPAL_REDIS_URL=redis+sentinel://127.0.0.1:26379,127.0.0.1:26380,127.0.0.1:26381/mymaster
+      # Enable Scopes
+      - OPAL_SCOPES=1
+      # Server Log configuration
+      - OPAL_LOG_LEVEL=INFO
+      - OPAL_LOG_FORMAT_INCLUDE_PID=true
+      # number of uvicorn workers to run inside the opal-server container
+      - UVICORN_NUM_WORKERS=1
+      # Policy repo configuration (see if it can be removed, since we are using scopes)      
+      - OPAL_POLICY_REPO_URL=https://github.com/permitio/opal-example-policy-repo
+      # Policy repo polling interval (should probably change to a webhook approach in real deployments)
+      - OPAL_POLICY_REPO_POLLING_INTERVAL=30
+      # Initially empty - tenants will be added dynamically via API
+      - OPAL_DATA_CONFIG_SOURCES={"config":{"entries":[]}}
+      # - OPAL_DATA_CONFIG_SOURCES={"config":{"entries":[{"url":"file:///data/roles.json","config":{"fetcher":"FileFetchProvider","is_json":true},"topics":["policy_data"],"dst_path":"/roles","periodic_update_interval":30},{"url":"file:///data/users.json","config":{"fetcher":"FileFetchProvider","is_json":true},"topics":["policy_data"],"dst_path":"/users","periodic_update_interval":30}]}}
+    ports:
+      # exposes opal server on the host machine, you can access the server at: http://localhost:7002
+      - "7002:7002"
+    network_mode: "host"
+    depends_on:
+      - redis-sentinel-1
+      - redis-sentinel-2
+      - redis-sentinel-3
+
+  opal-client-smesh-app1:
+    # by default we run opal-client from latest official image
+    image: hub.comcast.net/dhapigw/opal-client:latest
+    container_name: opal-client-smesh-app1
+    environment:
+      # Server connection
+      - OPAL_SERVER_URL=http://127.0.0.1:7002
+      # Client Scope ID
+      - OPAL_SCOPE_ID=app1
+      # Data topics - using transformed format for matching
+      - OPAL_DATA_TOPICS=policy_data
+      # Client Log configuration
+      - OPAL_LOG_FORMAT_INCLUDE_PID=true
+      - OPAL_LOG_LEVEL=DEBUG
+      # Enable Data Updater
+      - OPAL_DATA_UPDATER_ENABLED=true
+      - OPAL_POLICY_SUBSCRIPTION_DIRS=.:services/app1
+      # Custom port to avoid conflicts when using host networking
+      - UVICORN_PORT=7766
+    ports:
+      - "7766:7766"
+      - "8181:8181"
+    network_mode: "host"
+    depends_on:
+      - opal-server
+    # Wait for server, register scope, then start client
+    command: >
+      sh -c "
+      ./wait-for.sh 127.0.0.1:7002 --timeout=20 &&
+      wget --method=PUT --header='Content-Type: application/json' --body-data='{\"scope_id\":\"app1\",\"policy\":{\"source_type\":\"git\",\"url\":\"https://github.com/permitio/opal-example-policy-repo\",\"branch\":\"master\",\"directories\":[\".\"],\"auth\":{\"auth_type\":\"none\"}},\"data\":{\"entries\":[{\"url\":\"file:///data/authz.json\",\"config\":{\"fetcher\":\"FileFetchProvider\",\"is_json\":true},\"dst_path\":\"/services/app1/rules\",\"topics\":[\"policy_data\",\"gateway_data\"],\"periodic_update_interval\":60}]}}' -O- http://127.0.0.1:7002/scopes &&
+      exec ./start.sh
+      "
+    # Mount data files into the container
+    volumes:
+      - ./data/app1:/data:ro
+
+  opal-client-gateway:
+    # by default we run opal-client from latest official image
+    image: hub.comcast.net/dhapigw/opal-client:latest
+    container_name: opal-client-gateway
+    environment:
+      # Server connection
+      - OPAL_SERVER_URL=http://127.0.0.1:7002
+      - OPAL_POLICY_STORE_URL=http://127.0.0.1:8182
+      # No scope - uses default scope to get server's policy repo
+      # Data topics to subscribe to (shared topic that all scopes publish to)
+      - OPAL_DATA_TOPICS=data:gateway_data
+      # Client Log configuration
+      - OPAL_LOG_FORMAT_INCLUDE_PID=true
+      - OPAL_LOG_LEVEL=TRACE
+      # Enable Data Updater
+      - OPAL_DATA_UPDATER_ENABLED=true
+      # Custom ports to avoid conflicts with app1 client
+      - UVICORN_PORT=7767
+      - OPAL_INLINE_OPA_ENABLED=true
+      - OPAL_INLINE_OPA_CONFIG={"addr":"0.0.0.0:8182"}
+    ports:
+      - "7767:7767"
+      - "8182:8182"
+    network_mode: "host"
+    depends_on:
+      - opal-server
+    # Wait for server, then start client
+    command: sh -c "exec ./wait-for.sh 127.0.0.1:7002 --timeout=20 -- ./start.sh"
+
+# This configuration 
+
+# 3. Add tenant1 data (initial tenant - no restart needed):
+# curl -X POST http://localhost:7002/data/config \
+#   -H "Content-Type: application/json" \
+#   -d '{
+#     "entries": [
+#       {
+#         "url": "file:///data/roles.json",
+#         "config": {
+#           "fetcher": "FileFetchProvider",
+#           "is_json": true
+#         },
+#         "topics": [
+#           "tenant_data"
+#         ],
+#         "dst_path": "/roles",
+#         "periodic_update_interval": 30
+#       },
+#       {
+#         "url": "file:///data/users.json",
+#         "config": {
+#           "fetcher": "FileFetchProvider",
+#           "is_json": true
+#         },
+#         "topics": [
+#           "tenant_data"
+#         ],
+#         "dst_path": "/users",
+#         "periodic_update_interval": 30
+#       }
+#     ],
+#     "reason": "Load tenant1 data via single topic"
+#   }'

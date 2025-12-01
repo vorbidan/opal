@@ -1,0 +1,49 @@
+   [
+   {
+      "paths": [
+        "/api/*",
+        "/secure/*"
+      ],
+      "methods": [
+        "GET",
+        "POST"
+      ],
+      "cidrs": [
+        "10.0.0.0/8",
+        "192.168.0.0/16"
+      ],
+      "idp": {
+        "capabilities": [
+          "read:api",
+          "write:api"
+        ],
+        "allowedPartners": [
+          "partner1",
+          "partner2"
+        ],
+        "scopes": [
+          "api:read",
+          "api:write"
+        ]
+      }
+    },
+    {
+      "paths": [
+        "/admin/*"
+      ],
+      "methods": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE"
+      ],
+      "idp": {
+        "capabilities": [
+          "admin:*"
+        ],
+        "scopes": [
+          "admin:full"
+        ]
+      }
+    }
+  ]
