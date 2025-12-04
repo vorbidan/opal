@@ -1,0 +1,116 @@
+version: '3.8'
+
+# OPAL Scopes Deployment Template
+# This template demonstrates isolated client mode with scopes
+
+name: opal-scopes-deployment
+
+services:
+  # =============================================================================
+  # INFRASTRUCTURE
+  # =============================================================================
+  
+  redis:
+    image: redis:7-alpine
+    container_name: opal-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # =============================================================================
+  # OPAL SERVER (Scopes Enabled)
+  # =============================================================================
+  
+  opal-server:
+    image: permitio/opal-server:latest
+    container_name: opal-server
+    environment:
+      # === Scopes Configuration ===
+      - OPAL_SCOPES=true
+      - OPAL_REDIS_URL=redis://redis:6379
+      - OPAL_BROADCAST_URI=redis://redis:6379
+      
+      # === Policy Repository (fallback for non-scoped clients) ===
+      - OPAL_POLICY_REPO_URL=https://github.com/permitio/opal-example-policy-repo
+      - OPAL_POLICY_REPO_MAIN_BRANCH=master
+      - OPAL_POLICY_REPO_POLLING_INTERVAL=30
+      
+      # === Data Configuration (initially empty, scopes define their own) ===
+      - OPAL_DATA_CONFIG_SOURCES={"config":{"entries":[]}}
+      
+      # === Server Settings ===
+      - UVICORN_NUM_WORKERS=1
+      - OPAL_LOG_LEVEL=INFO
+      - OPAL_LOG_FORMAT_INCLUDE_PID=true
+      
+    ports:
+      - "7002:7002"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "http://localhost:7002"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - opal-server-data:/root/.local/state/opal
+
+  # =============================================================================
+  # ISOLATED CLIENTS (Service Mesh / Sidecar Mode)
+  # =============================================================================
+  # Each client has its own SCOPE_ID and subscribes only to its scope-specific topics
+  # This ensures complete data isolation between services
+  
+  # Isolated Client for Service 1
+  opal-client-service1:
+    image: permitio/opal-client:latest
+    container_name: opal-client-service1
+    environment:
+      # === Server Connection ===
+      - OPAL_SERVER_URL=http://opal-server:7002
+      
+      # === CRITICAL: Scope Configuration ===
+      # Setting SCOPE_ID enables topic namespacing for isolation
+      # Client will subscribe to: service1:data:policy_data
+      - OPAL_SCOPE_ID=service1
+      
+      # === Data Subscription ===
+      # Topics WITHOUT scope prefix (automatically namespaced to: service1:data:policy_data)
+      #! - OPAL_DATA_TOPICS=policy_data
+      
+      # === Policy Filtering ===
+      # Only load policies from root and service1 directory
+      - OPAL_POLICY_SUBSCRIPTION_DIRS=.:services/service1
+      
+      # === OPA Configuration ===
+      - OPAL_INLINE_OPA_ENABLED=true
+      - OPAL_POLICY_STORE_URL=http://localhost:8181
+      - OPAL_INLINE_OPA_LOG_FORMAT=http
+      - OPAL_INLINE_OPA_CONFIG={"addr":"0.0.0.0:8181"}
+      
+      # === Client Settings ===
+      - OPAL_LOG_LEVEL=DEBUG
+      - OPAL_LOG_FORMAT_INCLUDE_PID=true
+
+      # Custom port to avoid conflicts when using host networking
+      - UVICORN_PORT=7101
+      
+    ports:
+      - "7101:7101"  # OPAL client API
+      - "8181:8181"  # OPA for service1
+    depends_on:
+      opal-server:
+        condition: service_healthy
+    command: sh -c "exec ./wait-for.sh opal-server:7002 --timeout=30 -- ./start.sh"
+
+  
+volumes:
+  redis-data:
+  opal-server-data:
